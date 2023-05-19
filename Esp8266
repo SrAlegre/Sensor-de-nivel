@@ -1,0 +1,155 @@
+//Versão da lib do esp8622 : 2.6
+
+
+
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>  // 6.14.1
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+
+
+#define VERSION 1
+
+
+// WiFi
+const char *ssid = "Yuri";  // Enter your WiFi name
+const char *password = "cachorro";    // Enter WiFi password
+
+// MQTT Broker
+const char *mqtt_broker = "0.tcp.sa.ngrok.io";
+
+String _topic = "sensor/" + WiFi.macAddress() + "/out"; 
+
+
+const char *topic = _topic.c_str(); 
+const char *mqtt_username = "";
+const char *mqtt_password = "";
+const int mqtt_port = 10224;
+
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+
+
+
+// DEFINIÇÕES
+#define endereco 0x27  // Endereços comuns: 0x27, 0x3F
+#define colunas 20
+#define linhas 4
+float analogPin = A0;
+float val = 0, metros = 0;
+
+
+LiquidCrystal_I2C lcd(endereco, colunas, linhas);
+
+
+
+void setup() {
+
+  lcd.init();       // INICIA A COMUNICAÇÃO COM O DISPLAY
+  lcd.backlight();  // LIGA A ILUMINAÇÃO DO DISPLAY
+
+  // Set software serial baud to 115200;
+  Serial.begin(115200);
+  // connecting to a WiFi network
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.println("Connecting to WiFi..");
+  }
+  Serial.println("Connected to the WiFi network");
+
+  //connecting to a mqtt broker
+
+  client.setServer(mqtt_broker, mqtt_port);
+  client.setCallback(callback);
+  while (!client.connected()) {
+    String client_id = "esp8266-client-";
+    client_id += String(WiFi.macAddress());
+    Serial.printf("The client %s connects to the public mqtt broker\n", client_id.c_str());
+    if (client.connect(client_id.c_str(), mqtt_username, mqtt_password)) {
+      Serial.println("Public emqx mqtt broker connected");
+    } else {
+      Serial.print("failed with state ");
+      Serial.print(client.state());
+      delay(2000);
+    }
+  }
+  // publish and subscribe
+  // client.publish(topic, "hello Yuri);
+
+  // client.subscribe(topic);
+}
+ //topic = &String(WiFi.macAddress());
+
+void callback(char *topic, byte *payload, unsigned int length) {
+  Serial.print("Message arrived in topic: ");
+  Serial.println(topic);
+  Serial.print("Message:");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+  Serial.println("-----------------------");
+}
+
+void loop() {
+  client.loop();
+
+  char buffer[256];
+  float Dados = LeituraSensor();
+  char dado_string[8];
+  dtostrf(Dados, 5, 2, dado_string);
+
+  Serial.print("[OLD] ESP32 Board MAC Address:  ");
+  Serial.println(WiFi.macAddress());
+
+
+
+  StaticJsonDocument<96> doc;
+
+  String Mac = String(WiFi.macAddress());
+
+  
+  doc["version"] = VERSION;
+  doc["level"] = Dados;
+  
+  serializeJson(doc, buffer);
+  //serializeJson(doc, Serial);
+  Serial.println();
+
+
+
+  client.publish(topic, buffer);
+  client.subscribe(topic);
+  delay(5000);
+}
+
+
+float LeituraSensor() {
+
+//REVER DADOS DE ENTRADAS E SAIDA , E FAZER REGRASSAO LINEAR
+
+  val = analogRead(analogPin);
+  val = (float)val * 5 / 1023;
+
+  lcd.clear();  // LIMPA O DISPLAY
+  lcd.print("- Tensao : ");
+  lcd.print(val);
+  lcd.print(" V");
+  lcd.setCursor(0, 1);  // POSICIONA O CURSOR NA PRIMEIRA COLUNA DA LINHA 2
+  Serial.println("Tensao:");
+  Serial.println(val);
+  lcd.setCursor(0, 3);
+  //lcd.print("atualizando 3s");
+  lcd.print("- Metros:");
+  metros = val / 0.83;  //Conferir parametros
+  lcd.print(metros);
+
+
+  delay(3000);
+  return metros;
+}
